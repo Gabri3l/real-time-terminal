@@ -1,46 +1,31 @@
 #![deny(warnings)]
 
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
+mod client;
+mod server;
 
-const DEFAULT_ADDRESS_AND_PORT: &str = "127.0.0.1:8080";
+use log::error;
+use std::{env, fmt::Error};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // When I use the await it means I want to wait this asynchronous request
-    // to complete before moving forward. The ? indicates that it can fail and
-    // it will return the error to the caller, so it bubbles that up.
-    // This is possible if the function this is in has a return value matching
-    // the error returned potentially by this async call.
-    let listener = TcpListener::bind(DEFAULT_ADDRESS_AND_PORT).await?;
+async fn main() -> Result<(), Error> {
+    // Initializing a global logger, this allows me to use
+    // macros like info!, warn!, and error!
+    // I have to run RUST_LOG=info cargo run for the specific
+    // log to show (info in this case)
+    let _ = env_logger::try_init().expect("Error initializing global logger");
 
-    loop {
-        // Here I have a tuple returned from listener.accept, the first value
-        // is declared as mutable. While I wasn't sure why this is necessary here
-        // it seems that the next calls to read/write_all expect the socket to be
-        // mutable (TODO: will have to dig more on this)
-        let (mut socket, _) = listener.accept().await?;
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        error!("Usage: {} <server|client>", args[0]);
+        std::process::exit(1);
+    }
 
-        tokio::spawn(async move {
-            let mut buf = [0 as u8; 1024];
-
-            loop {
-                let n = match socket.read(&mut buf).await {
-                    Ok(n) if n == 0 => return,
-                    Ok(n) => n,
-                    Err(e) => {
-                        eprintln!("failed to read from socket; err ={:?}", e);
-                        return;
-                    }
-                };
-
-                if let Err(e) = socket.write_all(&buf[0..n]).await {
-                    eprintln!("failed to write to socket; err = {:?}", e);
-                    return;
-                }
-            }
-        });
+    match args[1].as_str() {
+        "server" => server::server::run_server().await,
+        "client" => client::client::run_client().await,
+        _ => {
+            error!("Unknown argument; {}", args[1]);
+            std::process::exit(1);
+        }
     }
 }
