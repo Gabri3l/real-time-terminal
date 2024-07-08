@@ -3,7 +3,7 @@
 mod client;
 mod server;
 
-use log::error;
+use log::{error, info};
 use std::{env, fmt::Error};
 
 #[tokio::main]
@@ -21,8 +21,11 @@ async fn main() -> Result<(), Error> {
     }
 
     match args[1].as_str() {
-        "server" => server::server::run_server().await,
-        "client" => client::client::run_client().await,
+        "server" => {
+            info!("We're alive");
+            server::server::run_server().await
+        },
+        "client" => client::client::run_client(),
         _ => {
             error!("Unknown argument; {}", args[1]);
             std::process::exit(1);
