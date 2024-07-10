@@ -1,9 +1,19 @@
 #![deny(warnings)]
 
-use futures_util::{future, StreamExt, TryStreamExt};
+use futures_util::stream::SplitSink;
+use futures_util::{future, SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
-use std::{env, fmt::Error};
+use std::fmt::Error;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::{collections::HashMap, env};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::WebSocketStream;
+
+type Tx = Arc<Mutex<SplitSink<WebSocketStream<TcpStream>, Message>>>;
+type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 
 pub async fn run_server() -> Result<(), Error> {
     // This will read the nth argument and unwrap it, if
@@ -23,6 +33,9 @@ pub async fn run_server() -> Result<(), Error> {
 
     info!("Listening on port {}", addr);
 
+    // Create a shared state for the connected peers
+    let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Tx>::new()));
+
     // Before this was represented with a while loop on the await and
     // it would extract the result from Ok inline. That meant errors
     // were not getting handled. This seems to be a more robust way to
@@ -30,7 +43,8 @@ pub async fn run_server() -> Result<(), Error> {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                tokio::spawn(accept_connection(stream));
+                let peer_map = peer_map.clone();
+                tokio::spawn(accept_connection(peer_map, stream));
             }
             Err(e) => {
                 error!("Failed to accept connection: {:?}", e);
@@ -39,7 +53,7 @@ pub async fn run_server() -> Result<(), Error> {
     }
 }
 
-async fn accept_connection(stream: TcpStream) {
+async fn accept_connection(peer_map: PeerMap, stream: TcpStream) {
     let addr = stream.peer_addr().expect("Error retrieving peer address");
     info!("Peer addr: {}", addr);
 
@@ -51,12 +65,39 @@ async fn accept_connection(stream: TcpStream) {
     info!("New socket conn: {}", addr);
 
     let (write, read) = ws_stream.split();
+    let write = Arc::new(Mutex::new(write));
+
+    // Insert the new peer into the shared state
+    peer_map.lock().await.insert(addr, write.clone());
+
+    // Clone the peer_map for use in the message loop
+    let peer_map_inner = peer_map.clone();
+
     // It seems like a lot of try_* methods are ones that expect a potential error
     // which I believe is why .expect can be chained.
     // In this case the try_filter attempts to filter incoming messages so that
     // only text and binary are accepted.
     read.try_filter(|msg| future::ready(msg.is_text() || msg.is_binary()))
-        .forward(write)
-        .await
-        .expect("Failed to forward message")
+        .for_each(|msg| {
+            let msg = msg.unwrap();
+            let peer_map_inner = peer_map_inner.clone();
+            let addr = addr.clone();
+
+            async move {
+                let peers = peer_map_inner.lock().await;
+                for (peer_addr, peer_tx) in peers.iter() {
+                    if *peer_addr != addr {
+                        let mut peer_tx = peer_tx.lock().await;
+                        if let Err(e) = peer_tx.send(msg.clone()).await {
+                            error!("Failed to send message to {}: {}", peer_addr, e);
+                        }
+                    }
+                }
+            }
+        })
+        .await;
+
+    // Remove the peer from the shared state when done
+    peer_map.lock().await.remove(&addr);
+    info!("{} disconnected", addr);
 }
