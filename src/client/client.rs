@@ -31,11 +31,12 @@ pub async fn run_client() -> Result<(), Error> {
 
     let (write, read) = ws_stream.split();
     let stdin_to_ws = stdin_rx.map(Ok).forward(write);
-
     let ws_to_stdout = {
         read.for_each(|message| async {
             let data = message.unwrap().into_data();
-            tokio::io::stdout().write_all(&data).await.unwrap();
+            let mut prefixed_data = b"> ".to_vec();
+            prefixed_data.extend_from_slice(&data);
+            tokio::io::stdout().write_all(&prefixed_data).await.unwrap();
         })
     };
 
