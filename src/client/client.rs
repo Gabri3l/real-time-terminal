@@ -12,7 +12,7 @@ pub async fn run_client() -> Result<(), Error> {
     // anonymous function
     let addr = env::args().nth(2).unwrap_or_else(|| {
         info!("No address provided, using default");
-        "127.0.0.1:8080".to_string()
+        "ws://127.0.0.1:8080/".to_string()
     });
 
     // The thing I find confusing and I"m not sure how idiomatic it is,
@@ -24,7 +24,9 @@ pub async fn run_client() -> Result<(), Error> {
     // uses to continuously read from std input.
     tokio::spawn(read_stdin(stdin_tx));
 
-    let (ws_stream, _) = connect_async(&addr).await.expect("Failed to connect");
+    let (ws_stream, _) = connect_async(&addr)
+        .await
+        .expect(&format!("Failed to connect to {}", addr));
     println!("WebSocket handshake has been completed");
 
     let (write, read) = ws_stream.split();
