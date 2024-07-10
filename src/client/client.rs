@@ -6,7 +6,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-#[tokio::main]
 pub async fn run_client() -> Result<(), Error> {
     // This will read the nth argument and unwrap it, if
     // there's no argument provided it will run the

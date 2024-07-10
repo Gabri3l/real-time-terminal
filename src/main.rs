@@ -24,8 +24,8 @@ async fn main() -> Result<(), Error> {
         "server" => {
             info!("We're alive");
             server::server::run_server().await
-        },
-        "client" => client::client::run_client(),
+        }
+        "client" => client::client::run_client().await,
         _ => {
             error!("Unknown argument; {}", args[1]);
             std::process::exit(1);
